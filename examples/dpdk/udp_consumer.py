@@ -28,7 +28,7 @@ logging.basicConfig(format='[{asctime}]{levelname}:{message}',
                     style='{')
 
 
-# Usage example: python consumer.py http://localhost:3030 172.17.0.1 9001 172.17.0.2 9001
+# Usage example: python udp_consumer.py http://localhost:3030 172.17.0.1 9001 172.17.0.2 9001
 if len(sys.argv) < 6:
     print('Insufficient argument')
     sys.exit(-1)
