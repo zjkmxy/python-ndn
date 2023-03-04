@@ -4,6 +4,7 @@ verify_ssl = true
 name = "pypi"
 
 [packages]
+aiohttp = "*"
 
 [dev-packages]
 python-ndn = {editable = true, extras = ["dev,pyca"], path = "."}
