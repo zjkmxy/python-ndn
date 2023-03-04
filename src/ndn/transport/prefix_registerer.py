@@ -27,9 +27,9 @@ class PrefixRegisterer(abc.ABC):
         self.app = app
 
     @abc.abstractmethod
-    async def register(self, name: enc.NonStrictName) -> bool:
+    async def register(self, name: enc.FormalName) -> bool:
         pass
 
     @abc.abstractmethod
-    async def unregister(self, name: enc.NonStrictName) -> bool:
+    async def unregister(self, name: enc.FormalName) -> bool:
         pass
