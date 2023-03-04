@@ -37,7 +37,7 @@ class NfdRegister(PrefixRegisterer):
         super().__init__()
         self._prefix_register_semaphore = aio.Semaphore(1)
 
-    async def register(self, name: enc.NonStrictName) -> bool:
+    async def register(self, name: enc.FormalName) -> bool:
         # Fix the issue that NFD only allows one packet signed by a specific key for a timestamp number
         async with self._prefix_register_semaphore:
             for _ in range(10):
@@ -65,7 +65,7 @@ class NfdRegister(PrefixRegisterer):
                 logging.error(f'Registration for {enc.Name.to_str(name)} failed: {e.__class__.__name__}')
                 return False
 
-    async def unregister(self, name: enc.NonStrictName) -> bool:
+    async def unregister(self, name: enc.FormalName) -> bool:
         # Fix the issue that NFD only allows one packet signed by a specific key for a timestamp number
         async with self._prefix_register_semaphore:
             for _ in range(10):
