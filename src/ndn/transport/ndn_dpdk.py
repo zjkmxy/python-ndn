@@ -18,6 +18,7 @@
 from abc import ABC
 import asyncio as aio
 import logging
+import os
 from .face import Face
 from .prefix_registerer import PrefixRegisterer
 from .graphql import GqlClient
@@ -179,7 +180,7 @@ class NdnDpdkMemifFace(NdnDpdkFace):
             "scheme": "memif",
             "id": self.id_num,
             "socketName": self.socket_name,
-            "socketOwner": [0, 0],
+            "socketOwner": [os.getuid(), os.getgid()],
         })
 
         self.memif = self.memif_class(self.socket_name, self.id_num, False, self._rx_proc)
@@ -205,6 +206,6 @@ class NdnDpdkMemifFace(NdnDpdkFace):
 
     def send(self, data: bytes):
         if self.memif is not None:
-            self.memif.send(data)
+            self.memif.send(bytes(data))
         else:
             raise ValueError('Unable to send packet before connection')
