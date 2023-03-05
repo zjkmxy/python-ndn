@@ -18,6 +18,7 @@
 from abc import ABC
 import asyncio as aio
 import logging
+import os
 from .face import Face
 from .prefix_registerer import PrefixRegisterer
 from .graphql import GqlClient
@@ -159,3 +160,52 @@ class DpdkRegisterer(PrefixRegisterer):
         except KeyError:
             return False
         return True
+
+
+class NdnDpdkMemifFace(NdnDpdkFace):
+    socket_name: str
+    id_num: int
+
+    def __init__(self, gql_url: str, memif_class, socket_name: str, id_num: int):
+        super().__init__(gql_url)
+        self.memif_class = memif_class
+        self.socket_name = socket_name
+        self.id_num = id_num
+        self.memif = None
+
+    async def open(self):
+        # Send GraphQL command
+        self.face_id = await self.client.create_face({
+            "dataroom": 2048,
+            "scheme": "memif",
+            "id": self.id_num,
+            "socketName": self.socket_name,
+            "socketOwner": [os.getuid(), os.getgid()],
+        })
+
+        self.memif = self.memif_class(self.socket_name, self.id_num, False, self._rx_proc)
+        self.running = True
+
+    def _rx_proc(self, data: bytes):
+        typ, _ = enc.parse_tl_num(data)
+        aio.create_task(self.callback(typ, data))
+
+    async def run(self):
+        while self.running:
+            self.memif.poll()
+            await aio.sleep(0.01)
+
+    def shutdown(self):
+        self.running = False
+
+        # Send GraphQL command
+        aio.create_task(self.client.delete(self.face_id))
+
+        self.memif = None
+        self.face_id = ""
+
+    def send(self, data: bytes):
+        if self.memif is not None:
+            self.memif.send(bytes(data))
+        else:
+            raise ValueError('Unable to send packet before connection')

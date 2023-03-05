@@ -25,7 +25,10 @@ class GqlClient:
     async def create_face(self, locator: dict) -> str:
         response = await self._request("mutation createFace($locator: JSON!) { createFace(locator: $locator) { id }}",
                                        {"locator": locator})
-        return response["data"]["createFace"]["id"]
+        try:
+            return response["data"]["createFace"]["id"]
+        except (KeyError, IndexError):
+            raise RuntimeError(json.dumps(response))
 
     async def insert_fib(self, face: str, prefix: str):
         response = await self._request(

@@ -17,10 +17,11 @@
 # -----------------------------------------------------------------------------
 import typing
 import logging
+import memif
 import sys
 from ndn import appv2
 from ndn import encoding as enc
-from ndn.transport.ndn_dpdk import NdnDpdkUdpFace, DpdkRegisterer
+from ndn.transport.ndn_dpdk import NdnDpdkMemifFace, DpdkRegisterer
 
 
 logging.basicConfig(format='[{asctime}]{levelname}:{message}',
@@ -29,18 +30,16 @@ logging.basicConfig(format='[{asctime}]{levelname}:{message}',
                     style='{')
 
 
-# Usage example: python udp_producer.py http://localhost:3030 172.17.0.1 9000 172.17.0.2 9000
-if len(sys.argv) < 6:
+# Usage example: python memif_producer.py http://localhost:3030 /run/ndn/memif.sock 0
+if len(sys.argv) < 4:
     print('Insufficient argument')
     sys.exit(-1)
 
 gpl_url = sys.argv[1]
-self_addr = sys.argv[2]
-self_port = int(sys.argv[3])
-dpdk_addr = sys.argv[4]
-dpdk_port = int(sys.argv[5])
+socket_name = sys.argv[2]
+id_num = int(sys.argv[3])
 
-face = NdnDpdkUdpFace(gpl_url, self_addr, self_port, dpdk_addr, dpdk_port)
+face = NdnDpdkMemifFace(gpl_url, memif.NativeMemif, socket_name, id_num)
 registerer = DpdkRegisterer(face)
 
 app = appv2.NDNApp(face=face, registerer=registerer)

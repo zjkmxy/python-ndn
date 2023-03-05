@@ -35,6 +35,7 @@ class Face(metaclass=abc.ABCMeta):
     def shutdown(self):
         pass
 
+    # TODO: Signature is wrong. Should be Bytes-like object.
     @abc.abstractmethod
     def send(self, data: bytes):
         pass
