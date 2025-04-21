@@ -1,5 +1,5 @@
 # -----------------------------------------------------------------------------
-# Copyright (C) 2023-2025 The python-ndn authors
+# Copyright (C) 2023-2023 The python-ndn authors
 #
 # This file is part of python-ndn.
 #
@@ -15,38 +15,25 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 # -----------------------------------------------------------------------------
-import asyncio
 import logging
 import typing
 import secrets
 import time
 import asyncio as aio
-from dataclasses import dataclass
 from enum import Enum
 from ... import encoding as enc
 from ... import appv2 as app
 from .tlv import StateVec, StateVecWrapper, StateVecEntry
 
 
-__all__ = ['SvSyncUpdate', 'OnUpdateFunc', 'SvsState', 'SvsInst']
-
-from ...appv2 import ValidResult
-
-from ...utils import timestamp
+__all__ = ['OnMissingDataFunc', 'SvsState', 'SvsInst']
 
 
-@dataclass
-class SvSyncUpdate:
-    name: enc.FormalName
-    boot: int
-    high: int
-    low: int
-
-
-OnUpdateFunc = typing.Callable[[SvSyncUpdate], None]
+OnMissingDataFunc = typing.Callable[["SvsInst"], None]
 r"""
-Called when there is an update to fetch. This is called in a separate coroutine,
-which can be blocking.
+Called when there is a missing event.
+MUST BE NON-BLOCKING. Therefore, it is not allowed to fetch the missing data in this callback.
+It can start a task or trigger a signal to fetch missing data.
 """
 
 
@@ -56,49 +43,45 @@ class SvsState(Enum):
 
 
 class SvsInst:
-    on_update: OnUpdateFunc
+    on_missing: OnMissingDataFunc
     sync_interval: float
     suppression_interval: float
-    group_prefix: enc.FormalName
-    bootstrap_time: int
+    base_prefix: enc.FormalName
+    on_missing_data: OnMissingDataFunc
 
-    local_sv: dict[tuple[bytes, int], int]
-    agg_sv: dict[tuple[bytes, int], int]
+    local_sv: dict[bytes, int]
+    agg_sv: dict[bytes, int]
     state: SvsState
     self_seq: int
     self_node_id: bytes
     running: bool
     ndn_app: app.NDNApp | None
-    is_passive: bool = False  # Current implementation does not support passive mode
 
     next_sync_timing: float = 0.0
     timer_rst_event: aio.Event | None
-    sync_int_queue: aio.Queue[enc.Data] | None
-    signer: enc.Signer
-    validator: app.Validator
+    int_signer: enc.Signer
+    int_validator: app.Validator
     timer_task: aio.Task | None
 
-    def __init__(self, group_prefix: enc.NonStrictName, self_node_id: enc.NonStrictName,
-                 on_update: OnUpdateFunc, sync_data_signer: enc.Signer,
-                 sync_data_validator: app.Validator,
+    def __init__(self, base_prefix: enc.NonStrictName, self_node_id: enc.NonStrictName,
+                 on_missing_data: OnMissingDataFunc, sync_int_signer: enc.Signer,
+                 sync_int_validator: app.Validator,
                  sync_interval: float = 30, suppression_interval: float = 0.2,
-                 bootstrap_timestamp: int = 0):
-        self.group_prefix = enc.Name.normalize(group_prefix)
+                 last_used_seq_num: int = 0):
+        self.base_prefix = enc.Name.normalize(base_prefix)
         self.self_node_id = enc.Name.to_bytes(self_node_id)
         self.sync_interval = sync_interval
         self.suppression_interval = suppression_interval
-        self.bootstrap_time = bootstrap_timestamp if bootstrap_timestamp > 0 else timestamp()
-        self.on_update = on_update
+        self.on_missing_data = on_missing_data
         self.local_sv = {}
         self.agg_sv = {}
         self.state = SvsState.SyncSteady
-        self.self_seq = 0
+        self.self_seq = last_used_seq_num
         self.running = False
         self.timer_rst_event = None
-        self.sync_int_queue = None
         self.ndn_app = None
-        self.signer = sync_data_signer
-        self.validator = sync_data_validator
+        self.int_signer = sync_int_signer
+        self.int_validator = sync_int_validator
         self.timer_task = None
         self.logger = logging.getLogger(__name__)
 
@@ -110,30 +93,13 @@ class SvsInst:
         dev = secrets.randbits(16) / 65536 * self.suppression_interval
         return self.suppression_interval + dev - self.suppression_interval * 0.5
 
-    def sync_handler(self, name: enc.FormalName, app_param: enc.BinaryStr | None,
+    def sync_handler(self, name: enc.FormalName, _app_param: enc.BinaryStr | None,
                      _reply: app.ReplyFunc, _context: app.PktContext) -> None:
-        if len(name) != len(self.group_prefix) + 2:  # /<group-prefix>/v=3/<parameters-digest>
+        if len(name) != len(self.base_prefix) + 2:
             self.logger.error(f'Received invalid Sync Interest: {enc.Name.to_str(name)}')
             return
-
         try:
-            sync_data_name, sync_data_params, sync_data, sig_ptrs = enc.parse_data(app_param)
-        except (enc.DecodeError, IndexError, ValueError) as e:
-            self.logger.error(f'Unable to decode sync data [{enc.Name.to_str(name)}]: {e}')
-            return
-
-        if sync_data_name != self.group_prefix + enc.Name.from_str('v=3'):
-            self.logger.error(f'Sync data name [{enc.Name.to_str(sync_data_name)}] is illegal')
-            return
-
-        try:
-            self.sync_int_queue.put_nowait((sync_data_name, sync_data_params, sync_data, sig_ptrs))
-        except (aio.QueueFull, aio.QueueShutDown):
-            # Silently drop
-            pass
-
-        try:
-            remote_sv_pkt = StateVecWrapper.parse(app_param).val
+            remote_sv_pkt = StateVecWrapper.parse(name[-2]).val
         except (enc.DecodeError, IndexError) as e:
             self.logger.error(f'Unable to decode state vector [{enc.Name.to_str(name)}]: {e}')
             return
@@ -218,27 +184,6 @@ class SvsInst:
                 self.timer_rst_event.clear()
                 self.next_sync_timing = time.time() + self.sample_sync_timer()
 
-    async def run_sync_int_queue(self):
-        while self.running:
-            try:
-                sync_data_name, _, sync_data, sig_ptrs = await self.sync_int_queue.get()
-            except asyncio.QueueShutDown:
-                break
-            if await self.validator(sync_data_name, sig_ptrs, {}) <= ValidResult.SILENCE:
-                # sync data name does not make sense here, what else could we log?
-                self.logger.warning(f'Sync data [{enc.Name.to_str(sync_data_name)}]: failed validation')
-                continue
-            # Decode SyncData content and aggregate
-            try:
-                sv_pkt = StateVecWrapper.parse(sync_data)
-            except (ValueError, enc.DecodeError, IndexError) as e:
-                self.logger.warning(f'Sync data [{enc.Name.to_str(sync_data_name)}]: failed to parse {e}')
-                continue
-
-            for entry in sv_pkt.val.vecs:
-                node_id = entry.name
-                seq_nos = entry.seq_nos
-
     def express_sync_interest(self):
         # Append sv to name does not make any sense, but the spec says so
         sv_pkt = StateVecWrapper()
@@ -267,12 +212,10 @@ class SvsInst:
             raise RuntimeError(f'Sync is already running @[{enc.Name.to_str(self.base_prefix)}]')
         self.running = True
         self.timer_rst_event = aio.Event()
-        self.sync_int_queue = aio.Queue()
         if self.self_seq >= 0:
             self.local_sv[self.self_node_id] = self.self_seq
         self.ndn_app = ndn_app
-        # Sync Interest itself does not need to be signed.
-        self.ndn_app.attach_handler(self.group_prefix, self.sync_handler, app.pass_all)
+        self.ndn_app.attach_handler(self.base_prefix, self.sync_handler, self.int_validator)
         self.timer_task = aio.create_task(self.on_timer())
 
     def stop(self):
@@ -280,6 +223,5 @@ class SvsInst:
             return
         self.running = False
         self.timer_rst_event.set()
-        self.sync_int_queue.shutdown()
         self.ndn_app.detach_handler(self.base_prefix)
         self.timer_task = None
