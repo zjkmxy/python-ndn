@@ -1,5 +1,5 @@
 # -----------------------------------------------------------------------------
-# Copyright (C) 2023-2025 The python-ndn authors
+# Copyright (C) 2023-2023 The python-ndn authors
 #
 # This file is part of python-ndn.
 #
@@ -17,22 +17,17 @@
 # -----------------------------------------------------------------------------
 from ... import encoding as enc
 
-__all__ = ['SeqNoEntry', 'StateVecEntry', 'StateVec', 'StateVecWrapper', 'MappingEntry', 'MappingData',
-           'MappingDataWrapper']
 
-
-class SeqNoEntry(enc.TlvModel):
-    bootstrap_time = enc.UintField(0xd4)
-    seq_no = enc.UintField(0xd6)
+__all__ = ['StateVecEntry', 'StateVec', 'StateVecWrapper', 'MappingEntry', 'MappingData', 'MappingDataWrapper']
 
 
 class StateVecEntry(enc.TlvModel):
-    name = enc.NameField()
-    seq_nos = enc.RepeatedField(enc.ModelField(0xd2, SeqNoEntry))
+    node_id = enc.NameField()
+    seq_no = enc.UintField(0xcc)
 
 
 class StateVec(enc.TlvModel):
-    vecs = enc.RepeatedField(enc.ModelField(0xca, StateVecEntry))
+    entries = enc.RepeatedField(enc.ModelField(0xca, StateVecEntry))
 
 
 class StateVecWrapper(enc.TlvModel):
@@ -42,9 +37,6 @@ class StateVecWrapper(enc.TlvModel):
 class MappingEntry(enc.TlvModel):
     seq_no = enc.UintField(0xcc)
     app_name = enc.NameField()
-    # Recommended additional information
-    timestamp = enc.UintField(0x38)
-    bootstrap_time = enc.UintField(0xd4)
 
 
 class MappingData(enc.TlvModel):

@@ -1,5 +1,5 @@
 # -----------------------------------------------------------------------------
-# Copyright (C) 2023-2025 The python-ndn authors
+# Copyright (C) 2023-2023 The python-ndn authors
 #
 # This file is part of python-ndn.
 #
@@ -20,30 +20,20 @@ import typing
 import secrets
 import time
 import asyncio as aio
-from dataclasses import dataclass
 from enum import Enum
 from ... import encoding as enc
 from ... import appv2 as app
 from .tlv import StateVec, StateVecWrapper, StateVecEntry
 
 
-__all__ = ['SvSyncUpdate', 'OnUpdateFunc', 'SvsState', 'SvsInst']
-
-from ...utils import timestamp
+__all__ = ['OnMissingDataFunc', 'SvsState', 'SvsInst']
 
 
-@dataclass
-class SvSyncUpdate:
-    name: enc.FormalName
-    boot: int
-    high: int
-    low: int
-
-
-OnUpdateFunc = typing.Callable[[SvSyncUpdate], None]
+OnMissingDataFunc = typing.Callable[["SvsInst"], None]
 r"""
-Called when there is an update to fetch. This is called in a separate coroutine,
-which can be blocking.
+Called when there is a missing event.
+MUST BE NON-BLOCKING. Therefore, it is not allowed to fetch the missing data in this callback.
+It can start a task or trigger a signal to fetch missing data.
 """
 
 
@@ -53,14 +43,14 @@ class SvsState(Enum):
 
 
 class SvsInst:
-    on_update: OnUpdateFunc
+    on_missing: OnMissingDataFunc
     sync_interval: float
     suppression_interval: float
     base_prefix: enc.FormalName
-    bootstrap_time: int
+    on_missing_data: OnMissingDataFunc
 
-    local_sv: dict[tuple[bytes, int], int]
-    agg_sv: dict[tuple[bytes, int], int]
+    local_sv: dict[bytes, int]
+    agg_sv: dict[bytes, int]
     state: SvsState
     self_seq: int
     self_node_id: bytes
@@ -74,20 +64,19 @@ class SvsInst:
     timer_task: aio.Task | None
 
     def __init__(self, base_prefix: enc.NonStrictName, self_node_id: enc.NonStrictName,
-                 on_update: OnUpdateFunc, sync_int_signer: enc.Signer,
+                 on_missing_data: OnMissingDataFunc, sync_int_signer: enc.Signer,
                  sync_int_validator: app.Validator,
                  sync_interval: float = 30, suppression_interval: float = 0.2,
-                 bootstrap_timestamp: int = 0):
+                 last_used_seq_num: int = 0):
         self.base_prefix = enc.Name.normalize(base_prefix)
         self.self_node_id = enc.Name.to_bytes(self_node_id)
         self.sync_interval = sync_interval
         self.suppression_interval = suppression_interval
-        self.bootstrap_time = bootstrap_timestamp if bootstrap_timestamp > 0 else timestamp()
-        self.on_update = on_update
+        self.on_missing_data = on_missing_data
         self.local_sv = {}
         self.agg_sv = {}
         self.state = SvsState.SyncSteady
-        self.self_seq = 0
+        self.self_seq = last_used_seq_num
         self.running = False
         self.timer_rst_event = None
         self.ndn_app = None
