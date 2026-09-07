@@ -100,6 +100,7 @@ import struct
 import typing
 from enum import Enum, Flag
 from hashlib import sha256
+from types import UnionType
 
 from .tlv_type import VarBinaryStr, is_binary_str
 from .tlv_var import write_tl_num, parse_tl_num, get_tl_num_size
@@ -143,7 +144,7 @@ class NDNName:
 
 def _unwrap_optional(annotation):
     """Return T for Optional[T] = Union[T, None]; otherwise return unchanged."""
-    if typing.get_origin(annotation) is typing.Union:
+    if typing.get_origin(annotation) in (typing.Union, UnionType):
         args = [a for a in typing.get_args(annotation) if a is not type(None)]
         if len(args) == 1:
             return args[0]
